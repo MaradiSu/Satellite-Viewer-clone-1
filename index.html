@@ -1,56 +1,82 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="https://glitch.com/favicon.ico" />
-
-    <title>Hello World!</title>
-
-    <!-- meta tags for SEO and social sharing -->
-    <link rel="canonical" href="https://glitch-hello-website.glitch.me/" />
-    <meta name="description" content="A simple website, built with Glitch. Remix it to get your own." />
-    <meta name="robots" content="index,follow" />
-    <meta property="og:title" content="Hello World!" />
-    <meta property="og:type" content="article" />
-    <meta property="og:url" content="https://glitch-hello-website.glitch.me/" />
-    <meta property="og:description" content="A simple website, built with Glitch. Remix it to get your own." />
-    <meta property="og:image" content="https://cdn.glitch.com/605e2a51-d45f-4d87-a285-9410ad350515%2Fhello-website-social.png?v=1616712748147" />
-    <meta name="twitter:card" content="summary" />
+<head>
+  <script src="https://cesiumjs.org/releases/1.72/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesiumjs.org/releases/1.72/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/4.0.0/satellite.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/4.0.0/satellite.min.js"></script>
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+  <div id="loading">
+    <h1>Loading...</h1>
+  </div>
+  <div id="cesiumContainer"></div>
+  <script>
+    // Initialize the Cesium viewer.
+    const viewer = new Cesium.Viewer('cesiumContainer', {
+      imageryProvider: new Cesium.TileMapServiceImageryProvider({
+        url: Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII"),
+      }),
+      baseLayerPicker: false, geocoder: false, homeButton: false, infoBox: false,
+      navigationHelpButton: false, sceneModePicker: false
+    });
+    viewer.scene.globe.enableLighting = true;
+    // These 2 lines are published by NORAD and allow us to predict where
+    // the ISS is at any given moment. They are regularly updated.
+    // Get the latest from: https://celestrak.com/satcat/tle.php?CATNR=25544. 
+    const ISS_TLE = 
+    `1 25544U 98067A   21121.52590485  .00001448  00000-0  34473-4 0  9997
+    2 25544  51.6435 213.5204 0002719 305.2287 173.7124 15.48967392281368`;
+    const satrec = satellite.twoline2satrec(
+      ISS_TLE.split('\n')[0].trim(), 
+      ISS_TLE.split('\n')[1].trim()
+    );
+    // Give SatelliteJS the TLE's and a specific time.
+    // Get back a longitude, latitude, height (km).
+    // We're going to generate a position every second from now until one week from now. 
+    const totalSeconds = 60 * 60 * 24 * 7;
+    const timestepInSeconds = 1;
+    const start = Cesium.JulianDate.fromDate(new Date());
+    const stop = Cesium.JulianDate.addSeconds(start, totalSeconds, new Cesium.JulianDate());
+    viewer.clock.startTime = start.clone();
+    viewer.clock.stopTime = stop.clone();
+    viewer.clock.currentTime = start.clone();
+    viewer.timeline.zoomTo(start, stop);
+    viewer.clock.multiplier = 40;
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
     
-    <!-- import the webpage's stylesheet -->
-    <link rel="stylesheet" href="/style.css" />
+    const positionsOverTime = new Cesium.SampledPositionProperty();
+    for (let i = 0; i < totalSeconds; i+= timestepInSeconds) {
+      const time = Cesium.JulianDate.addSeconds(start, i, new Cesium.JulianDate());
+      const jsDate = Cesium.JulianDate.toDate(time);
 
-    <!-- import the webpage's javascript file -->
-    <script src="/script.js" defer></script>
-  </head>
-  <body>
-    <!-- the wrapper and content divs set margins and positioning -->
-    <div class="wrapper">
-      <div class="content" role="main">
-        <!-- this is the start of content for our page -->
-        <h1 class="title">Hello World!</h1>
-        <img
-          src="https://cdn.glitch.com/a9975ea6-8949-4bab-addb-8a95021dc2da%2Fillustration.svg?v=1618177344016"
-          class="illustration"
-          alt="Editor illustration"
-        />
-      </div>
-    </div>
-    <!-- the footer holds our remix button — you can use it for structure or cut it out ✂ -->
-    <footer class="footer">
-      <div class="links"></div>
-      <a
-        class="btn--remix"
-        target="_top"
-        href="https://glitch.com/edit/#!/remix/glitch-hello-website"
-      >
-        <img
-          src="https://cdn.glitch.com/605e2a51-d45f-4d87-a285-9410ad350515%2FLogo_Color.svg?v=1618199565140"
-          alt=""
-        />
-        Remix on Glitch
-      </a>
-    </footer>
-  </body>
+      const positionAndVelocity = satellite.propagate(satrec, jsDate);
+      const gmst = satellite.gstime(jsDate);
+      const p   = satellite.eciToGeodetic(positionAndVelocity.position, gmst);
+
+      const position = Cesium.Cartesian3.fromRadians(p.longitude, p.latitude, p.height * 1000);
+      positionsOverTime.addSample(time, position);
+    }
+    
+    // Visualize the satellite with a red dot.
+    const satellitePoint = viewer.entities.add({
+      position: positionsOverTime,
+      point: { pixelSize: 5, color: Cesium.Color.RED }
+    });
+
+    // Set the camera to follow the satellite 
+    viewer.trackedEntity = satellitePoint;
+    // Wait for globe to load then zoom out     
+    let initialized = false;
+    viewer.scene.globe.tileLoadProgressEvent.addEventListener(() => {
+      if (!initialized && viewer.scene.globe.tilesLoaded === true) {
+        viewer.clock.shouldAnimate = true;
+        initialized = true;
+        viewer.scene.camera.zoomOut(7000000);
+        document.querySelector("#loading").classList.toggle('disappear', true)
+      }
+    });
+  </script>
+</body>
 </html>
