@@ -20,7 +20,8 @@
       baseLayerPicker: false, geocoder: false, homeButton: false, infoBox: false,
       navigationHelpButton: false, sceneModePicker: false
     });
-    viewer.scene.globe.enableLighting = true;
+    // This causes a bug on android, see: https://github.com/CesiumGS/cesium/issues/7871
+    // viewer.scene.globe.enableLighting = true;
     // These 2 lines are published by NORAD and allow us to predict where
     // the ISS is at any given moment. They are regularly updated.
     // Get the latest from: https://celestrak.com/satcat/tle.php?CATNR=25544. 
